@@ -3,17 +3,13 @@ uvicorn
 python-dotenv
 google-generativeai
 sentence-transformers
-# Ensure the new pinecone library is used, not the old one
 pinecone
 requests
 
-# A more robust set of dependencies for unstructured.io
+# A simplified and more robust set of dependencies for unstructured.io
 unstructured
 
-# Dependencies for parsing specific file types with partition.auto
+# Core dependencies for parsing specific file types with partition.auto
 pypdf
 python-docx
 msg-parser
-
-# Dependency for reliable file type detection on Linux servers
-python-magic
