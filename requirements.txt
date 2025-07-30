@@ -3,7 +3,7 @@ uvicorn
 python-dotenv
 google-generativeai
 sentence-transformers
-pinecone-client
+pinecone
 requests
 unstructured[pdf]
 pypdf
