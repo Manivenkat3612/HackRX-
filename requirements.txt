@@ -1,0 +1,26 @@
+fastapi
+uvicorn
+python-dotenv
+google-generativeai
+sentence-transformers
+pinecone
+requests
+
+# Main library for high-accuracy parsing
+unstructured[pdf,local-inference]
+
+# unstructured.io dependencies for PDF processing
+pypdf
+pikepdf
+pdf2image
+# For table extraction
+unstructured.pytesseract
+unstructured.PaddleOCR
+# Model for layout detection
+torch
+torchvision
+
+# Additional document format support
+python-docx
+email-validator
+openpyxl 
