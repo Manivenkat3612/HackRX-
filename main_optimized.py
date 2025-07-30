@@ -26,15 +26,16 @@ AUTH_TOKEN = os.getenv("AUTH_TOKEN", "650a0269eda6ed91714c00834a396c272707251173
 
 # Validate that all necessary environment variables are set
 if not all([GOOGLE_API_KEY, PINECONE_API_KEY, PINECONE_INDEX_NAME]):
-    raise ValueError("One or more required environment variables are not set (GOOGLE_API_KEY, PINECONE_API_KEY, PINECONE_INDEX_NAME).")
+    raise ValueError("One or more required environment variables are not set.")
 
-# Initialize services
+# Initialize services that have a low memory footprint
 genai.configure(api_key=GOOGLE_API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-reranker_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+# OPTIMIZED: Models are now loaded inside the processing function to save memory at startup.
+embedding_model = None
+reranker_model = None
 
 app = FastAPI(title="High-Accuracy Intelligent Query-Retrieval System")
 security = HTTPBearer()
@@ -60,14 +61,10 @@ def get_text_chunks_unstructured(doc_url: str) -> List[str]:
     try:
         response = requests.get(doc_url, timeout=20)
         response.raise_for_status()
-        
-        # Use tempfile to create a temporary file that works on all OS
-        # Adding a suffix helps unstructured.io's auto-detection
         with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as tmp:
             tmp.write(response.content)
             temp_file_path = tmp.name
         
-        # Use "fast" strategy for compatibility with free deployment environments
         elements = partition(filename=temp_file_path, strategy="fast")
         chunks = chunk_by_title(elements, max_characters=1000)
         chunk_texts = [chunk.text for chunk in chunks]
@@ -99,14 +96,17 @@ def get_answer_from_llm(question: str, context: str) -> str:
 
 def process_single_question(question: str, text_chunks: List[str], namespace: str) -> str:
     """Processes a single question from parsing to generation."""
+    global embedding_model, reranker_model
     try:
+        # OPTIMIZED: Lazy load models only when the first question is processed.
+        if embedding_model is None:
+            embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        if reranker_model is None:
+            reranker_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+
         query_embedding = embedding_model.encode(question).tolist()
         
-        retrieval_results = index.query(
-            vector=query_embedding,
-            top_k=20,
-            namespace=namespace
-        )
+        retrieval_results = index.query(vector=query_embedding, top_k=20, namespace=namespace)
         
         if not retrieval_results['matches']:
             return "No relevant information found in the document for this question."
@@ -140,18 +140,21 @@ async def run_submission(request: QueryRequest, token: str = Depends(verify_toke
     text_chunks = get_text_chunks_unstructured(request.documents)
     
     try:
-        embeddings = embedding_model.encode(text_chunks, show_progress_bar=False).tolist()
+        # Temporarily load the embedding model just for this step
+        temp_embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        embeddings = temp_embedding_model.encode(text_chunks, show_progress_bar=False).tolist()
+        del temp_embedding_model # Free up memory immediately
+
         vectors_to_upsert = [(f"vec_{i}", emb) for i, emb in enumerate(embeddings)]
         index.upsert(vectors=vectors_to_upsert, namespace=namespace, batch_size=100)
         
-        # A short delay to ensure Pinecone's index is ready before querying.
         time.sleep(2)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upsert vectors to Pinecone: {e}")
 
-    # Process questions in parallel for significant speed improvement.
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # OPTIMIZED: Reduced max_workers to manage memory during parallel processing.
+    with ThreadPoolExecutor(max_workers=2) as executor:
         future_to_question = {
             executor.submit(process_single_question, question, text_chunks, namespace): question 
             for question in request.questions
@@ -166,7 +169,6 @@ async def run_submission(request: QueryRequest, token: str = Depends(verify_toke
             except Exception as e:
                 question_to_answer[question] = f"Error processing question: {e}"
     
-    # Reorder the answers to match the original question order
     final_answers = [question_to_answer[q] for q in request.questions]
     
     return QueryResponse(answers=final_answers)
@@ -174,3 +176,4 @@ async def run_submission(request: QueryRequest, token: str = Depends(verify_toke
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
