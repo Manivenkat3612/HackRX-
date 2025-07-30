@@ -3,13 +3,10 @@ uvicorn
 python-dotenv
 google-generativeai
 sentence-transformers
-pinecone
+pinecone-client
 requests
-
-# A simplified and more robust set of dependencies for unstructured.io
-unstructured
-
-# Core dependencies for parsing specific file types with partition.auto
+unstructured[pdf]
 pypdf
 python-docx
 msg-parser
+python-magic
